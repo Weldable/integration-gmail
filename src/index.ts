@@ -1,4 +1,4 @@
-import { defineIntegration, createRestHandler } from '@weldable/integration-core'
+import { defineIntegration, createRestHandler, fakeId, fakeArray, fakeEmail, fakeIsoTimestamp, deriveSeed } from '@weldable/integration-core'
 
 const rest = createRestHandler()
 
@@ -60,6 +60,11 @@ export default defineIntegration({
         { name: 'resultSizeEstimate', type: 'number', description: 'Estimated total number of results.' },
       ],
       execute: rest({ method: 'GET', path: '/users/me/messages', paramMapping: { q: 'query', maxResults: 'query', labelIds: 'query' } }),
+      mockExecute: async (_args, ctx) => ({
+        messages: fakeArray(ctx.seed, 3, (s) => ({ id: fakeId(s, 16), threadId: fakeId(deriveSeed(s, 't'), 16) })),
+        nextPageToken: undefined,
+        resultSizeEstimate: 3,
+      }),
     },
     {
       actionId: 'get_message',
@@ -101,6 +106,26 @@ export default defineIntegration({
         { name: 'internalDate', type: 'string', description: 'Internal message date as milliseconds since epoch.' },
       ],
       execute: rest({ method: 'GET', path: '/users/me/messages/{id}', paramMapping: { id: 'path', format: 'query' } }),
+      mockExecute: async (args, ctx) => {
+        const id = String(args.id ?? fakeId(ctx.seed, 16))
+        return {
+          id,
+          threadId: fakeId(deriveSeed(ctx.seed, 't'), 16),
+          snippet: 'Mock email snippet for workflow authoring.',
+          labelIds: ['INBOX'],
+          payload: {
+            headers: [
+              { name: 'From', value: fakeEmail(deriveSeed(ctx.seed, 'from')) },
+              { name: 'To', value: fakeEmail(deriveSeed(ctx.seed, 'to')) },
+              { name: 'Subject', value: 'Mock Subject' },
+              { name: 'Date', value: fakeIsoTimestamp(ctx.seed) },
+            ],
+            mimeType: 'text/plain',
+            body: { data: '' },
+          },
+          internalDate: String(Date.parse(fakeIsoTimestamp(ctx.seed))),
+        }
+      },
     },
     {
       actionId: 'search_messages',
@@ -135,6 +160,11 @@ export default defineIntegration({
         { name: 'resultSizeEstimate', type: 'number', description: 'Estimated total number of results.' },
       ],
       execute: rest({ method: 'GET', path: '/users/me/messages', paramMapping: { q: 'query', maxResults: 'query' } }),
+      mockExecute: async (_args, ctx) => ({
+        messages: fakeArray(ctx.seed, 2, (s) => ({ id: fakeId(s, 16), threadId: fakeId(deriveSeed(s, 't'), 16) })),
+        nextPageToken: undefined,
+        resultSizeEstimate: 2,
+      }),
     },
     {
       actionId: 'send_message',
@@ -163,6 +193,11 @@ export default defineIntegration({
         { name: 'labelIds', type: 'array', description: 'Labels applied to the sent message (typically SENT).' },
       ],
       execute: rest({ method: 'POST', path: '/users/me/messages/send', paramMapping: { raw: 'body' } }),
+      mockExecute: async (_args, ctx) => ({
+        id: fakeId(ctx.seed, 16),
+        threadId: fakeId(deriveSeed(ctx.seed, 't'), 16),
+        labelIds: ['SENT'],
+      }),
     },
     {
       actionId: 'modify_labels',
@@ -505,6 +540,11 @@ export default defineIntegration({
         { name: 'resultSizeEstimate', type: 'number', description: 'Estimated total number of results.' },
       ],
       execute: rest({ method: 'GET', path: '/users/me/threads', paramMapping: { q: 'query', maxResults: 'query', labelIds: 'query', pageToken: 'query' } }),
+      mockExecute: async (_args, ctx) => ({
+        threads: fakeArray(ctx.seed, 3, (s) => ({ id: fakeId(s, 16), snippet: 'Mock thread snippet.', historyId: fakeId(deriveSeed(s, 'h'), 8) })),
+        nextPageToken: undefined,
+        resultSizeEstimate: 3,
+      }),
     },
     {
       actionId: 'get_thread',
@@ -538,6 +578,12 @@ export default defineIntegration({
         { name: 'historyId', type: 'string', description: 'The ID of the last history record for this thread.' },
       ],
       execute: rest({ method: 'GET', path: '/users/me/threads/{id}', paramMapping: { id: 'path', format: 'query' } }),
+      mockExecute: async (args, ctx) => ({
+        id: String(args.id ?? fakeId(ctx.seed, 16)),
+        snippet: 'Mock thread preview.',
+        historyId: fakeId(deriveSeed(ctx.seed, 'h'), 8),
+        messages: fakeArray(ctx.seed, 2, (s) => ({ id: fakeId(s, 16), threadId: String(args.id ?? fakeId(ctx.seed, 16)), snippet: 'Message snippet.' })),
+      }),
     },
     {
       actionId: 'modify_thread',
