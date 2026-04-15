@@ -17,8 +17,25 @@ npm install @weldable/integration-gmail @weldable/integration-core
 ```ts
 import integration from '@weldable/integration-gmail'
 
-// Pass to a Weldable-compatible host
-console.log(integration.actions.map(a => a.id))
+// Search your inbox
+const list = integration.actions.find(a => a.id === 'gmail.list_messages')!
+
+const messages = await list.execute(
+  { q: 'from:alerts@example.com is:unread', maxResults: 5 },
+  ctx, // ActionContext from your Weldable-compatible host
+)
+
+// Send an email (RFC 2822 format, base64url-encoded)
+const send = integration.actions.find(a => a.id === 'gmail.send_message')!
+
+const raw = btoa(
+  'To: alice@example.com\r\n' +
+  'Subject: Weekly report\r\n' +
+  'Content-Type: text/plain\r\n\r\n' +
+  'Here is your weekly summary.'
+).replace(/\+/g, '-').replace(/\//g, '_')
+
+await send.execute({ raw }, ctx)
 ```
 
 ## Contributing and releasing
