@@ -1,6 +1,51 @@
-import { defineIntegration, createRestHandler, fakeId, fakeArray, fakeEmail, fakeIsoTimestamp, deriveSeed } from '@weldable/integration-core'
+import { defineIntegration, createRestHandler, IntegrationValidationError, fakeId, fakeArray, fakeEmail, fakeIsoTimestamp, deriveSeed } from '@weldable/integration-core'
 
 const rest = createRestHandler()
+
+// Shared handler for message sending: send_message composes `raw` from
+// to/subject/body when not supplied, then delegates here so the standard
+// REST error mapping applies.
+const sendRaw = rest({ method: 'POST', path: '/users/me/messages/send', paramMapping: { raw: 'body' } })
+
+/** RFC 2047 encoded-word for header values containing non-ASCII characters. */
+function encodeHeaderValue(value: string): string {
+  return /^[\x20-\x7e]*$/.test(value)
+    ? value
+    : `=?UTF-8?B?${Buffer.from(value, 'utf8').toString('base64')}?=`
+}
+
+/**
+ * Compose a minimal RFC 2822 text/plain message from to/subject/body/cc/bcc
+ * and base64url-encode it — the Gmail API `raw` wire format. The vendor field
+ * is genuinely hostile to workflow authors (no transform step can reasonably
+ * build MIME), so this is a deliberate, declared composing wrapper.
+ */
+function buildRawMessage(args: Record<string, unknown>): string {
+  const to = typeof args.to === 'string' ? args.to.trim() : ''
+  const body = typeof args.body === 'string' ? args.body : ''
+  if (!to || !body) {
+    throw new IntegrationValidationError(
+      'Provide either raw (a base64url MIME message) or at least to and body.',
+      !to ? 'to' : 'body',
+    )
+  }
+  const subject = typeof args.subject === 'string' ? args.subject : ''
+  const cc = typeof args.cc === 'string' && args.cc.trim() ? args.cc.trim() : undefined
+  const bcc = typeof args.bcc === 'string' && args.bcc.trim() ? args.bcc.trim() : undefined
+
+  const headers = [
+    `To: ${to}`,
+    cc ? `Cc: ${cc}` : undefined,
+    bcc ? `Bcc: ${bcc}` : undefined,
+    `Subject: ${encodeHeaderValue(subject)}`,
+    'MIME-Version: 1.0',
+    'Content-Type: text/plain; charset="UTF-8"',
+    'Content-Transfer-Encoding: base64',
+  ].filter((h): h is string => h !== undefined)
+
+  const message = `${headers.join('\r\n')}\r\n\r\n${Buffer.from(body, 'utf8').toString('base64')}`
+  return Buffer.from(message, 'utf8').toString('base64url')
+}
 
 export default defineIntegration({
   id: 'gmail',
@@ -169,7 +214,7 @@ export default defineIntegration({
     {
       actionId: 'send_message',
       name: 'Send email',
-      description: 'Compose and send an email message.',
+      description: 'Compose and send an email message. Provide to/subject/body (the simple path — the message is composed for you), or a complete pre-built MIME message in raw.',
       intents: [
         'email someone',
         'write an email',
@@ -181,10 +226,40 @@ export default defineIntegration({
       ],
       inputFields: [
         {
+          name: 'to',
+          type: 'string',
+          required: false,
+          description: 'Recipient address(es), comma-separated. Required unless raw is provided.',
+        },
+        {
+          name: 'subject',
+          type: 'string',
+          required: false,
+          description: 'Email subject line.',
+        },
+        {
+          name: 'body',
+          type: 'text',
+          required: false,
+          description: 'Plain-text message body. Required unless raw is provided.',
+        },
+        {
+          name: 'cc',
+          type: 'string',
+          required: false,
+          description: 'Cc address(es), comma-separated.',
+        },
+        {
+          name: 'bcc',
+          type: 'string',
+          required: false,
+          description: 'Bcc address(es), comma-separated.',
+        },
+        {
           name: 'raw',
           type: 'string',
-          required: true,
-          description: 'The email message to send.',
+          required: false,
+          description: 'A complete RFC 2822 MIME message, base64url-encoded (the Gmail API wire format). Advanced: use only when you need full control (HTML parts, attachments, custom headers); overrides to/subject/body/cc/bcc.',
         },
       ],
       outputFields: [
@@ -192,7 +267,10 @@ export default defineIntegration({
         { name: 'threadId', type: 'string', description: 'The thread ID the sent message belongs to.' },
         { name: 'labelIds', type: 'array', description: 'Labels applied to the sent message (typically SENT).' },
       ],
-      execute: rest({ method: 'POST', path: '/users/me/messages/send', paramMapping: { raw: 'body' } }),
+      execute: async (args, ctx) => {
+        const raw = typeof args.raw === 'string' && args.raw ? args.raw : buildRawMessage(args)
+        return sendRaw({ raw }, ctx)
+      },
       mockExecute: async (_args, ctx) => ({
         id: fakeId(ctx.seed, 16),
         threadId: fakeId(deriveSeed(ctx.seed, 't'), 16),
